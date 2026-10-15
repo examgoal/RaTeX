@@ -1,5 +1,16 @@
 # RaTeX
 
+> **ExamGOAL fork.** Adds a MathJax 3 compatibility mode and host-measured `\text{…}`
+> runs (shaped by the platform, e.g. Devanagari) — see [docs/MATHJAX_COMPAT.md](docs/MATHJAX_COMPAT.md).
+> Releases are tagged `v<upstream>-eg.<n>`:
+>
+> - **Android**: `implementation("com.examgoal:ratex-android:<version>")` from
+>   `maven { url = uri("https://raw.githubusercontent.com/examgoal/RaTeX/maven") }`
+> - **iOS (SwiftPM)**: `.package(url: "https://github.com/examgoal/RaTeX", exact: "<version>")`, product `RaTeX`
+>
+> Use `RaTeXLayoutOptions.mathJax(…)` on either platform to get MathJax behavior.
+
+
 [简体中文](README.zh-CN.md) | **English**
 
 **KaTeX-compatible math rendering engine in pure Rust — no JavaScript, no WebView, no DOM.**

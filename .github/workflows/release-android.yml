@@ -1,8 +1,9 @@
-# 推送版本 tag（如 v0.0.4）时：构建 AAR、上传到 Maven Central、创建 GitHub Release 并附带 AAR。
-# 使用 com.vanniktech.maven.publish 插件简化发布流程。
-#
-# 仓库 Secrets：SONATYPE_NEXUS_USERNAME, SONATYPE_NEXUS_PASSWORD, GPG_PRIVATE_KEY, GPG_PASSPHRASE
-name: Release Android (Maven Central)
+# On a version tag (e.g. v0.1.14-eg.1): build the AAR, publish com.examgoal:ratex-android
+# to the GitHub-hosted Maven repository on the `maven` branch
+# (https://raw.githubusercontent.com/<owner>/RaTeX/maven), and attach the AAR to the
+# GitHub Release. Maven Central publishing also runs when its secrets are set:
+# SONATYPE_NEXUS_USERNAME, SONATYPE_NEXUS_PASSWORD, GPG_PRIVATE_KEY, GPG_PASSPHRASE.
+name: Release Android (Maven)
 
 on:
   push:
@@ -14,6 +15,9 @@ permissions:
 
 jobs:
   publish:
+    env:
+      # Maven Central needs Sonatype credentials; without them only the GitHub repository is published
+      HAS_MAVEN_CENTRAL: ${{ secrets.SONATYPE_NEXUS_USERNAME != '' }}
 
     runs-on: ubuntu-latest
 
@@ -63,8 +67,32 @@ jobs:
           cd ../..
           python3 scripts/verify_android_elf.py platforms/android/build/outputs/aar/ratex-android-release.aar
 
+      - name: Publish to the GitHub Maven repository (maven branch)
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          REPO_DIR="$RUNNER_TEMP/maven-repo"
+          (cd demo/android && ./gradlew :ratex-android:publishAllPublicationsToGithubMavenRepository --no-daemon \
+              -PlibraryVersion="$VERSION" -PmavenRepoDir="$REPO_DIR")
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          BRANCH_DIR="$RUNNER_TEMP/maven-branch"
+          if git ls-remote --exit-code --heads origin maven >/dev/null; then
+            git fetch --depth=1 origin maven
+            git worktree add "$BRANCH_DIR" FETCH_HEAD
+            git -C "$BRANCH_DIR" switch -c maven
+          else
+            git worktree add --detach "$BRANCH_DIR"
+            git -C "$BRANCH_DIR" switch --orphan maven
+          fi
+          cp -R "$REPO_DIR"/. "$BRANCH_DIR"/
+          cd "$BRANCH_DIR"
+          git add -A
+          git commit -m "ratex-android $VERSION"
+          git push origin HEAD:maven
+
       - name: Publish to Maven Central
         # Central Portal 验证较慢，build service 轮询可能超时，但包已上传并触发 release，不影响实际发布
+        if: env.HAS_MAVEN_CENTRAL == 'true'
         continue-on-error: true
         run: |
           cd demo/android
