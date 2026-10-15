@@ -29,6 +29,8 @@ public enum DisplayItem: Codable {
     case line(LineData)
     case rect(RectData)
     case path(PathData)
+    /// A `\text{…}` run measured by `RaTeXLayoutOptions.measureText`.
+    case text(TextData)
     /// Forward-compatibility: unknown item type; should be ignored by renderers.
     case unknown(String)
 
@@ -42,6 +44,7 @@ public enum DisplayItem: Codable {
         case "Line":      self = .line(try LineData(from: decoder))
         case "Rect":      self = .rect(try RectData(from: decoder))
         case "Path":      self = .path(try PathData(from: decoder))
+        case "Text":      self = .text(try TextData(from: decoder))
         default:
             // Do not fail hard on new protocol variants.
             self = .unknown(tag)
@@ -54,6 +57,7 @@ public enum DisplayItem: Codable {
         case .line(let d):      try d.encode(to: encoder)
         case .rect(let d):      try d.encode(to: encoder)
         case .path(let d):      try d.encode(to: encoder)
+        case .text(let d):      try d.encode(to: encoder)
         case .unknown(let tag):
             var c = encoder.container(keyedBy: TypeKey.self)
             try c.encode(tag, forKey: .type)
@@ -125,6 +129,46 @@ public struct PathData: Codable {
     public let commands: [PathCommand]
     public let fill: Bool
     public let color: RaTeXColor
+}
+
+/// Draw `text` with the font `RaTeXLayoutOptions.measureText` measured, baseline-left at
+/// (`x`, `y`), at `scale` × the font size. `width`/`height`/`depth` are that measurement
+/// (already multiplied by `scale`).
+public struct TextData: Codable {
+    public let x: Double
+    public let y: Double
+    public let width: Double
+    public let height: Double
+    public let depth: Double
+    public let scale: Double
+    public let text: String
+    public let bold: Bool
+    public let italic: Bool
+    public let monospace: Bool
+    public let color: RaTeXColor
+
+    public var style: RaTeXTextStyle {
+        var style: RaTeXTextStyle = []
+        if bold { style.insert(.bold) }
+        if italic { style.insert(.italic) }
+        if monospace { style.insert(.monospace) }
+        return style
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        x         = try c.decode(Double.self, forKey: .x)
+        y         = try c.decode(Double.self, forKey: .y)
+        width     = try c.decodeIfPresent(Double.self, forKey: .width) ?? 0
+        height    = try c.decodeIfPresent(Double.self, forKey: .height) ?? 0
+        depth     = try c.decodeIfPresent(Double.self, forKey: .depth) ?? 0
+        scale     = try c.decode(Double.self, forKey: .scale)
+        text      = try c.decode(String.self, forKey: .text)
+        bold      = try c.decodeIfPresent(Bool.self, forKey: .bold) ?? false
+        italic    = try c.decodeIfPresent(Bool.self, forKey: .italic) ?? false
+        monospace = try c.decodeIfPresent(Bool.self, forKey: .monospace) ?? false
+        color     = try c.decode(RaTeXColor.self, forKey: .color)
+    }
 }
 
 // MARK: - Path commands  (internally tagged: {"type": "MoveTo", "x": ..., "y": ...})

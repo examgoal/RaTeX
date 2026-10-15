@@ -63,7 +63,7 @@ class RaTeXSpan private constructor(
                 RaTeXFontLoader.ensureLoaded(context)
                 val dl = RaTeXEngine.parse(latex, displayMode, color)
                 val fontSizePx = fontSize * context.resources.displayMetrics.density
-                val renderer = RaTeXRenderer(dl, fontSizePx) { RaTeXFontLoader.getTypeface(it) }
+                val renderer = RaTeXRenderer(dl, fontSizePx, typefaceLoader = { RaTeXFontLoader.getTypeface(it) })
 
                 val w = ceil(renderer.widthPx).toInt().coerceAtLeast(1)
                 val h = ceil(renderer.totalHeightPx).toInt().coerceAtLeast(1)

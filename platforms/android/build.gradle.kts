@@ -19,6 +19,8 @@ android {
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
         }
+        // native code binds io.ratex.RaTeXEngine and calls RaTeXTextMeasurer.measure by name
+        consumerProguardFiles("consumer-rules.pro")
     }
 
     sourceSets["main"].jniLibs.srcDirs("src/main/jniLibs")
@@ -41,15 +43,32 @@ dependencies {
 val libraryVersion = project.findProperty("libraryVersion")?.toString()?.takeIf { it.isNotBlank() }
     ?: File(rootProject.rootDir, "../../VERSION").normalize().readText().trim()
 
+// ExamGOAL fork: published to the GitHub-hosted Maven repository on the fork's
+// `maven` branch (https://raw.githubusercontent.com/examgoal/RaTeX/maven) by
+// release-android.yml; `-PmavenRepoDir=<dir>` picks where the repo is written.
+// Maven Central publishing still works when Sonatype credentials and a signing
+// key are configured.
+val mavenRepoDir = project.findProperty("mavenRepoDir")?.toString()
+    ?: layout.buildDirectory.dir("maven-repo").get().asFile.path
+
+publishing {
+    repositories {
+        maven {
+            name = "githubMaven"
+            url = uri(mavenRepoDir)
+        }
+    }
+}
+
 mavenPublishing {
     publishToMavenCentral(com.vanniktech.maven.publish.SonatypeHost.CENTRAL_PORTAL, automaticRelease = true)
-    signAllPublications()
-    coordinates("io.github.erweixin", "ratex-android", libraryVersion)
+    if (project.hasProperty("signingInMemoryKey")) signAllPublications()
+    coordinates("com.examgoal", "ratex-android", libraryVersion)
 
     pom {
-        name.set("RaTeX Android")
-        description.set("Native Android rendering of LaTeX math (Canvas + KaTeX fonts)")
-        url.set("https://github.com/erweixin/RaTeX")
+        name.set("RaTeX Android (ExamGOAL fork)")
+        description.set("Native Android rendering of LaTeX math (Canvas + KaTeX fonts) with a MathJax 3 compatibility mode")
+        url.set("https://github.com/examgoal/RaTeX")
         licenses {
             license {
                 name.set("MIT")
@@ -57,14 +76,18 @@ mavenPublishing {
             }
         }
         scm {
-            url.set("https://github.com/erweixin/RaTeX")
-            connection.set("scm:git:git://github.com/erweixin/RaTeX.git")
-            developerConnection.set("scm:git:ssh://git@github.com/erweixin/RaTeX.git")
+            url.set("https://github.com/examgoal/RaTeX")
+            connection.set("scm:git:git://github.com/examgoal/RaTeX.git")
+            developerConnection.set("scm:git:ssh://git@github.com/examgoal/RaTeX.git")
         }
         developers {
             developer {
                 name.set("RaTeX Contributors")
                 url.set("https://github.com/erweixin/RaTeX")
+            }
+            developer {
+                name.set("ExamGOAL")
+                url.set("https://github.com/examgoal/RaTeX")
             }
         }
     }

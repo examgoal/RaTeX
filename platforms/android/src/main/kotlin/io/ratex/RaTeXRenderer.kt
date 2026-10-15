@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path as AndroidPath
 import android.graphics.Typeface
+import android.text.TextPaint
 import android.util.Log
 
 /**
@@ -20,11 +21,14 @@ import android.util.Log
  * @param displayList   The layout output from [RaTeXEngine.parse].
  * @param fontSize      Font size in pixels. Matches the desired display size on screen.
  * @param typefaceLoader Optional (fontId: String) -> Typeface? for glyph rendering.
+ * @param textTypeface  Typeface for [DisplayItem.Text] runs by [RaTeXTextStyle] flags — the
+ *   same one the layout's [RaTeXTextMeasurer] measured with. Defaults to the system font.
  */
 class RaTeXRenderer(
     val displayList: DisplayList,
     val fontSize: Float,
     private val typefaceLoader: ((String) -> Typeface?)? = null,
+    private val textTypeface: ((styleFlags: Int) -> Typeface)? = null,
 ) {
     // MARK: - Dimensions in pixels
 
@@ -50,6 +54,8 @@ class RaTeXRenderer(
                 is DisplayItem.Line      -> drawLine(canvas, item)
                 is DisplayItem.Rect      -> drawRect(canvas, item)
                 is DisplayItem.Path      -> drawPath(canvas, item)
+                is DisplayItem.Text      -> drawText(canvas, item)
+                DisplayItem.Unknown      -> Unit
             }
         }
         canvas.restore()
@@ -100,6 +106,16 @@ class RaTeXRenderer(
         textPaint.style = Paint.Style.FILL
         canvas.drawText(str, 0f, 0f, textPaint)
         canvas.restore()
+    }
+
+    private val runPaint = TextPaint(Paint.ANTI_ALIAS_FLAG)
+
+    private fun drawText(canvas: Canvas, t: DisplayItem.Text) {
+        runPaint.typeface = textTypeface?.invoke(t.styleFlags)
+            ?: PaintTextMeasurer.styled(Typeface.DEFAULT, t.styleFlags)
+        runPaint.textSize = fontSize * t.scale.toFloat()
+        runPaint.color = t.color.toArgb()
+        canvas.drawText(t.text, t.x.em(), t.y.em(), runPaint)
     }
 
     private fun drawLine(canvas: Canvas, l: DisplayItem.Line) {

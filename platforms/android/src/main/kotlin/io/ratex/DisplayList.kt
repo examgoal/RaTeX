@@ -6,7 +6,8 @@ package io.ratex
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonClassDiscriminator
+import kotlinx.serialization.modules.SerializersModule
+import kotlinx.serialization.modules.polymorphic
 
 // MARK: - Top-level output
 
@@ -60,6 +61,36 @@ sealed class DisplayItem {
         val fill: Boolean,
         val color: RaTeXColor,
     ) : DisplayItem()
+
+    /**
+     * A `\text{…}` run measured by the [RaTeXTextMeasurer] passed to layout; draw it
+     * with the same typeface, baseline-left at ([x], [y]), at [scale] × the font size.
+     * [width], [height] and [depth] are the measurement, already multiplied by [scale].
+     */
+    @Serializable @SerialName("Text")
+    data class Text(
+        val x: Double,
+        val y: Double,
+        val width: Double = 0.0,
+        val height: Double = 0.0,
+        val depth: Double = 0.0,
+        val scale: Double,
+        val text: String,
+        val bold: Boolean = false,
+        val italic: Boolean = false,
+        val monospace: Boolean = false,
+        val color: RaTeXColor,
+    ) : DisplayItem() {
+        /** [RaTeXTextStyle] bit flags. */
+        val styleFlags: Int
+            get() = (if (bold) RaTeXTextStyle.BOLD else 0) or
+                (if (italic) RaTeXTextStyle.ITALIC else 0) or
+                (if (monospace) RaTeXTextStyle.MONOSPACE else 0)
+    }
+
+    /** An item type newer than this decoder; renderers skip it. */
+    @Serializable @SerialName("Unknown")
+    data object Unknown : DisplayItem()
 }
 
 // MARK: - Path commands
@@ -108,4 +139,10 @@ data class RaTeXColor(
 internal val ratexJson = Json {
     ignoreUnknownKeys = true
     classDiscriminator = "type"
+    // newer item types decode as Unknown instead of failing the whole formula
+    serializersModule = SerializersModule {
+        polymorphic(DisplayItem::class) {
+            defaultDeserializer { DisplayItem.Unknown.serializer() }
+        }
+    }
 }

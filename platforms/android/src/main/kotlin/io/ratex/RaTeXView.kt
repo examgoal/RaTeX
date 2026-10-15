@@ -159,7 +159,7 @@ class RaTeXView @JvmOverloads constructor(
                 withContext(Dispatchers.IO) { RaTeXFontLoader.ensureLoaded(context) }
                 val dl = RaTeXEngine.parse(latex, displayMode, color)
                 val fontSizePx = fontSize * context.resources.displayMetrics.density
-                renderer = RaTeXRenderer(dl, fontSizePx) { RaTeXFontLoader.getTypeface(it) }
+                renderer = RaTeXRenderer(dl, fontSizePx, typefaceLoader = { RaTeXFontLoader.getTypeface(it) })
                 post {
                     requestLayout()
                     invalidate()

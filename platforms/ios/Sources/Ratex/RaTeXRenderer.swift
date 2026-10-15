@@ -12,13 +12,42 @@ import CoreText
 import Foundation
 
 public struct RaTeXRenderer {
+    /// Font for `DisplayItem.text` runs at a point size.
+    public typealias TextFont = (RaTeXTextStyle, CGFloat) -> CTFont
+
     public let displayList: DisplayList
     /// Font size in points. All em-unit coordinates are multiplied by this value.
     public let fontSize: CGFloat
+    /// Font for `\text{…}` runs — the one `RaTeXLayoutOptions.measureText` measured with.
+    public let textFont: TextFont?
 
-    public init(displayList: DisplayList, fontSize: CGFloat = 24) {
+    public init(displayList: DisplayList, fontSize: CGFloat = 24, textFont: TextFont? = nil) {
         self.displayList = displayList
         self.fontSize = fontSize
+        self.textFont = textFont
+    }
+
+    /// Measures `text` as `draw` will render it with `textFont`, for
+    /// `RaTeXLayoutOptions.measureText`. Pass the formula's `pointSize`: faces with
+    /// optical sizes (SF, New York) change widths with size.
+    public static func measure(
+        _ text: String,
+        style: RaTeXTextStyle,
+        textFont: TextFont,
+        pointSize: CGFloat = 100
+    ) -> RaTeXTextMetrics {
+        let size = max(pointSize, 1)
+        let attrs: [CFString: Any] = [kCTFontAttributeName: textFont(style, size)]
+        let line = CTLineCreateWithAttributedString(
+            CFAttributedStringCreate(nil, text as CFString, attrs as CFDictionary)!
+        )
+        let width = CTLineGetTypographicBounds(line, nil, nil, nil)
+        let ink = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
+        return RaTeXTextMetrics(
+            width: width / size,
+            height: max(0, ink.maxY) / size,
+            depth: max(0, -ink.minY) / size
+        )
     }
 
     // MARK: - Dimensions (in points)
@@ -41,6 +70,7 @@ public struct RaTeXRenderer {
             case .line(let l):      drawLine(l, in: context)
             case .rect(let r):      drawRect(r, in: context)
             case .path(let p):      drawPath(p, in: context)
+            case .text(let t):      drawText(t, in: context)
             case .unknown:
                 // Forward compatibility: ignore items newer than this decoder.
                 break
@@ -95,6 +125,26 @@ public struct RaTeXRenderer {
 
         CTLineDraw(line, ctx)
 
+        ctx.restoreGState()
+    }
+
+    // MARK: Text run
+
+    private func drawText(_ t: TextData, in ctx: CGContext) {
+        let size = pt(t.scale)
+        let font = textFont?(t.style, size) ?? CTFontCreateUIFontForLanguage(.system, size, nil)!
+        let attrs: [CFString: Any] = [
+            kCTFontAttributeName:            font,
+            kCTForegroundColorAttributeName: cgColor(t.color),
+        ]
+        let line = CTLineCreateWithAttributedString(
+            CFAttributedStringCreate(nil, t.text as CFString, attrs as CFDictionary)!
+        )
+        ctx.saveGState()
+        ctx.translateBy(x: pt(t.x), y: pt(t.y))
+        ctx.textMatrix = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 0)
+        ctx.textPosition = .zero
+        CTLineDraw(line, ctx)
         ctx.restoreGState()
     }
 
