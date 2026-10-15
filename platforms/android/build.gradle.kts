@@ -17,7 +17,7 @@ android {
 
         // Package the native .so files built by build-android.sh
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
         }
         // native code binds io.ratex.RaTeXEngine and calls RaTeXTextMeasurer.measure by name
         consumerProguardFiles("consumer-rules.pro")

@@ -26,7 +26,7 @@ rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-and
 在仓库根目录执行：
 ```bash
 bash platforms/android/build-android.sh
-# → src/main/jniLibs/{arm64-v8a,armeabi-v7a,x86_64}/libratex_ffi.so
+# → src/main/jniLibs/{arm64-v8a,armeabi-v7a,x86_64,x86}/libratex_ffi.so
 ```
 
 在 `settings.gradle` 中将本目录作为本地模块引入：

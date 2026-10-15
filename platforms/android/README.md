@@ -26,7 +26,7 @@ rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-and
 Build from repo root:
 ```bash
 bash platforms/android/build-android.sh
-# → src/main/jniLibs/{arm64-v8a,armeabi-v7a,x86_64}/libratex_ffi.so
+# → src/main/jniLibs/{arm64-v8a,armeabi-v7a,x86_64,x86}/libratex_ffi.so
 ```
 
 Include as a local module in `settings.gradle`:
