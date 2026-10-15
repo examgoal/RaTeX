@@ -39,6 +39,13 @@ pub enum BoxContent {
     /// flatten it to protocol-compatible `GlyphPath` items.
     GlyphRun { glyphs: Vec<RunGlyph> },
 
+    /// A run of text measured by the host's [`ratex_types::TextMeasurer`];
+    /// the host draws it with its own font.
+    HostText {
+        text: String,
+        style: ratex_types::TextStyle,
+    },
+
     /// Filled rectangle from `\rule[<raise>]{width}{height}`.
     /// `thickness` is the ink height; `raise` is the distance (in em) from the baseline
     /// to the bottom edge of the rectangle, positive toward the top of the line.
@@ -85,6 +92,8 @@ pub enum BoxContent {
         index_offset: f64,
         /// `scriptscript` size relative to the surrounding math style (for drawing the index).
         index_scale: f64,
+        /// Left edge of the index relative to the surd glyph's left edge (em).
+        index_x: f64,
         rule_thickness: f64,
         inner_height: f64,
     },

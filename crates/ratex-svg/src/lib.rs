@@ -200,6 +200,15 @@ pub fn render_to_svg_with_color_syntax(
                 fill,
                 color,
             } => emit_path_item(&mut body, *x, *y, commands, *fill, color, context),
+            DisplayItem::Text {
+                x,
+                y,
+                scale,
+                text,
+                style,
+                color,
+                ..
+            } => emit_host_text(&mut body, *x, *y, *scale, text, *style, color, context),
         }
     }
 
@@ -513,6 +522,53 @@ fn emit_rect(
     out.push('"');
     color_opacity_attr_into(out, color, "fill-opacity", color_syntax);
     let _ = write!(out, "/>");
+}
+
+/// Host-measured text run (`DisplayItem::Text`): a plain `<text>` element in
+/// the viewer's default font, which is what the run was measured with.
+#[allow(clippy::too_many_arguments)]
+fn emit_host_text(
+    out: &mut String,
+    x: f64,
+    y: f64,
+    scale: f64,
+    text: &str,
+    style: ratex_types::TextStyle,
+    color: &Color,
+    context: SvgRenderContext<'_>,
+) {
+    let opts = context.opts;
+    use std::fmt::Write;
+    let _ = write!(out, r#"<text x=""#);
+    fmt_num_to(out, tx(x, opts));
+    let _ = write!(out, r#"" y=""#);
+    fmt_num_to(out, ty(y, opts));
+    let _ = write!(out, r#"" font-size=""#);
+    fmt_num_to(out, scale * opts.em_px());
+    out.push('"');
+    if style.bold {
+        out.push_str(r#" font-weight="bold""#);
+    }
+    if style.italic {
+        out.push_str(r#" font-style="italic""#);
+    }
+    if style.monospace {
+        out.push_str(r#" font-family="monospace""#);
+    }
+    out.push_str(r#" fill=""#);
+    color_to_svg_into(out, color, context.color_syntax);
+    out.push('"');
+    color_opacity_attr_into(out, color, "fill-opacity", context.color_syntax);
+    out.push('>');
+    for ch in text.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            _ => out.push(ch),
+        }
+    }
+    out.push_str("</text>");
 }
 
 /// Append the SVG path data for `commands` to `out`, trimming the trailing

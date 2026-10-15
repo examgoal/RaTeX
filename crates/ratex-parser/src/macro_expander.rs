@@ -617,6 +617,46 @@ impl<'a> MacroExpander<'a> {
         self.load_function_macros();
     }
 
+    /// Plain-TeX and MathJax-only macros, enabled by [`ratex_types::Compat::MathJax`].
+    pub fn load_mathjax_macros(&mut self) {
+        // (name, argument count, expansion)
+        let defs: &[(&str, usize, &str)] = &[
+            ("\\matrix", 1, "\\begin{matrix}#1\\end{matrix}"),
+            ("\\pmatrix", 1, "\\begin{pmatrix}#1\\end{pmatrix}"),
+            ("\\eqalign", 1, "\\begin{aligned}#1\\end{aligned}"),
+            // MathJax's require/HTML extensions: keep the content, drop the rest
+            ("\\require", 1, ""),
+            ("\\class", 2, "{#2}"),
+            ("\\cssId", 2, "{#2}"),
+            ("\\style", 2, "{#2}"),
+        ];
+        for &(name, num_args, expansion) in defs {
+            let mut tokens = lex_all(expansion);
+            tokens.reverse();
+            self.macros.set(
+                name.to_string(),
+                MacroDefinition::Tokens { tokens, num_args },
+            );
+        }
+
+        // \buildrel #1\over #2 — plain TeX's relation-with-label-above
+        self.macros.set(
+            "\\buildrel".to_string(),
+            MacroDefinition::Function(|me: &mut MacroExpander| -> ParseResult<Vec<Token>> {
+                let top = me.consume_arg(Some(&["\\over"]))?.tokens;
+                let rel = me.consume_arg(None)?.tokens;
+                // consume_arg yields stack order; build forward, return reversed
+                let mut out = lex_all("\\stackrel{");
+                out.extend(top.into_iter().rev());
+                out.extend(lex_all("}{"));
+                out.extend(rel.into_iter().rev());
+                out.extend(lex_all("}"));
+                out.reverse();
+                Ok(out)
+            }),
+        );
+    }
+
     fn load_function_macros(&mut self) {
         // \noexpand: mark the next token as non-expandable (only if expandable)
         self.macros.set(
@@ -1489,4 +1529,18 @@ fn is_known_symbol(name: &str) -> bool {
     use ratex_font::symbols;
     symbols::get_symbol(name, symbols::Mode::Math).is_some()
         || symbols::get_symbol(name, symbols::Mode::Text).is_some()
+}
+
+/// Lex a macro body into tokens, in reading order.
+fn lex_all(text: &str) -> Vec<Token> {
+    let mut lexer = Lexer::new(text);
+    let mut tokens = Vec::new();
+    loop {
+        let tok = lexer.lex();
+        if tok.is_eof() {
+            break;
+        }
+        tokens.push(tok);
+    }
+    tokens
 }

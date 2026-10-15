@@ -30,12 +30,14 @@
 pub mod jni;
 
 use std::cell::RefCell;
-use std::ffi::{CStr, CString};
+use std::ffi::{c_void, CStr, CString};
 use std::os::raw::{c_char, c_int};
+use std::rc::Rc;
 
 use ratex_layout::{layout, to_display_list, LayoutOptions};
-use ratex_parser::parse;
+use ratex_parser::{parse_with_options, Compat, ParseOptions};
 use ratex_types::math_style::MathStyle;
+use ratex_types::{TextMeasurer, TextMetrics, TextStyle};
 use serde_json::Value;
 
 // Thread-local storage for the last error message.
@@ -83,13 +85,29 @@ fn sanitize_json_numbers(v: Value) -> Value {
     }
 }
 
-fn do_layout(
-    latex_str: &str,
-    style: MathStyle,
-    color: ratex_types::color::Color,
-) -> Result<String, String> {
-    let nodes = parse(latex_str).map_err(|e| format!("parse error: {e}"))?;
-    let options = LayoutOptions::default().with_style(style).with_color(color);
+/// Everything a layout call needs besides the TeX source.
+pub(crate) struct LayoutRequest {
+    pub style: MathStyle,
+    pub color: ratex_types::color::Color,
+    pub compat: Compat,
+    pub color_v2: bool,
+    pub measurer: Option<Rc<dyn TextMeasurer>>,
+}
+
+fn do_layout(latex_str: &str, request: LayoutRequest) -> Result<String, String> {
+    let parse_options = ParseOptions {
+        compat: request.compat,
+        color_v2: request.color_v2,
+    };
+    let nodes =
+        parse_with_options(latex_str, &parse_options).map_err(|e| format!("parse error: {e}"))?;
+    let mut options = LayoutOptions::default()
+        .with_style(request.style)
+        .with_color(request.color)
+        .with_compat(request.compat);
+    if let Some(measurer) = request.measurer {
+        options = options.with_text_measurer(measurer);
+    }
     let layout_box = layout(&nodes, &options);
     let display_list = to_display_list(&layout_box);
     let value =
@@ -157,6 +175,24 @@ fn validate_color(color: RatexColor) -> Result<ratex_types::color::Color, String
     Ok(color.into())
 }
 
+/// Host text measurement callback (see [`RatexOptions::measure_text`]).
+///
+/// Measure the NUL-terminated UTF-8 `text` in the host font at a 1em font
+/// size with `style_flags` (1 = bold, 2 = italic, 4 = monospace) and write its
+/// advance width, height above the baseline and depth below it, in em, to
+/// `out[0]`, `out[1]`, `out[2]`. Return 0 on success.
+pub type RatexMeasureTextFn = Option<
+    unsafe extern "C" fn(
+        ctx: *mut c_void,
+        text: *const c_char,
+        style_flags: u32,
+        out: *mut f64,
+    ) -> c_int,
+>;
+
+/// `RatexOptions::flags` bit: MathJax `colorv2` — `\color{c}{x}` colors only `x`.
+pub const RATEX_FLAG_COLOR_V2: u32 = 1;
+
 #[repr(C)]
 pub struct RatexOptions {
     /// Must be set to `sizeof(RatexOptions)` by the caller.
@@ -170,6 +206,56 @@ pub struct RatexOptions {
     /// Explicit LaTeX color commands like `\color{...}` / `\textcolor{...}{...}`
     /// still override this per subtree.
     pub color: *const RatexColor,
+    /// TeX dialect: `0` — KaTeX (default), `1` — MathJax 3.
+    pub compat: c_int,
+    /// `RATEX_FLAG_*` bits.
+    pub flags: u32,
+    /// Optional host text measurer. When set, text-mode runs (`\text{…}`,
+    /// `\textbf{…}`, …) are measured here and emitted as `Text` display items
+    /// for the host to draw with the same font (shaped, any script).
+    pub measure_text: RatexMeasureTextFn,
+    /// Passed back as `ctx` to `measure_text`.
+    pub measure_text_ctx: *mut c_void,
+}
+
+impl Default for RatexOptions {
+    /// Display mode, default color, KaTeX dialect, no flags, no measurer.
+    fn default() -> Self {
+        Self {
+            struct_size: std::mem::size_of::<RatexOptions>(),
+            display_mode: 1,
+            color: std::ptr::null(),
+            compat: 0,
+            flags: 0,
+            measure_text: None,
+            measure_text_ctx: std::ptr::null_mut(),
+        }
+    }
+}
+
+/// [`TextMeasurer`] over a C callback.
+struct CallbackMeasurer {
+    callback: unsafe extern "C" fn(*mut c_void, *const c_char, u32, *mut f64) -> c_int,
+    ctx: *mut c_void,
+}
+
+impl TextMeasurer for CallbackMeasurer {
+    fn measure(&self, text: &str, style: TextStyle) -> TextMetrics {
+        let Ok(c_text) = CString::new(text.replace('\0', "")) else {
+            return TextMetrics::default();
+        };
+        let mut out = [0.0f64; 3];
+        let status =
+            unsafe { (self.callback)(self.ctx, c_text.as_ptr(), style.flags(), out.as_mut_ptr()) };
+        if status != 0 || out.iter().any(|v| !v.is_finite()) {
+            return TextMetrics::default();
+        }
+        TextMetrics {
+            width: out[0],
+            height: out[1],
+            depth: out[2],
+        }
+    }
 }
 
 /// Result returned by [`ratex_parse_and_layout`].
@@ -251,7 +337,39 @@ pub unsafe extern "C" fn ratex_parse_and_layout(
         }
     };
 
-    match do_layout(latex_str, style, color) {
+    // Fields after `color` were added later; read them only when the caller's
+    // struct is large enough to contain them.
+    let has = |end: usize| !opts.is_null() && unsafe { (*opts).struct_size } >= end;
+    let compat_end = std::mem::offset_of!(RatexOptions, compat) + std::mem::size_of::<c_int>();
+    let flags_end = std::mem::offset_of!(RatexOptions, flags) + std::mem::size_of::<u32>();
+    let measure_end =
+        std::mem::offset_of!(RatexOptions, measure_text_ctx) + std::mem::size_of::<*mut c_void>();
+    let compat = if has(compat_end) && unsafe { (*opts).compat } == 1 {
+        Compat::MathJax
+    } else {
+        Compat::KaTeX
+    };
+    let color_v2 = has(flags_end) && unsafe { (*opts).flags } & RATEX_FLAG_COLOR_V2 != 0;
+    let measurer: Option<Rc<dyn TextMeasurer>> = if has(measure_end) {
+        let opts_ref = unsafe { &*opts };
+        opts_ref.measure_text.map(|callback| {
+            Rc::new(CallbackMeasurer {
+                callback,
+                ctx: opts_ref.measure_text_ctx,
+            }) as Rc<dyn TextMeasurer>
+        })
+    } else {
+        None
+    };
+
+    let request = LayoutRequest {
+        style,
+        color,
+        compat,
+        color_v2,
+        measurer,
+    };
+    match do_layout(latex_str, request) {
         Ok(json) => match CString::new(json) {
             Ok(cs) => RatexResult {
                 data: cs.into_raw(),
@@ -336,6 +454,7 @@ mod tests {
             struct_size: std::mem::size_of::<RatexOptions>(),
             display_mode,
             color: &black,
+            ..Default::default()
         };
         let result = unsafe { ratex_parse_and_layout(input.as_ptr(), &opts) };
         if result.error_code != 0 || result.data.is_null() {
@@ -375,6 +494,7 @@ mod tests {
             struct_size: std::mem::size_of::<RatexOptions>(),
             display_mode: 1,
             color: &black,
+            ..Default::default()
         };
         let result = unsafe { ratex_parse_and_layout(std::ptr::null(), &opts) };
         assert_ne!(result.error_code, 0);
@@ -421,6 +541,7 @@ mod tests {
             struct_size: std::mem::size_of::<RatexOptions>(),
             display_mode: 1,
             color: &blue,
+            ..Default::default()
         };
         let result = unsafe { ratex_parse_and_layout(input.as_ptr(), &opts) };
         assert_eq!(result.error_code, 0);
@@ -447,6 +568,7 @@ mod tests {
             struct_size: std::mem::size_of::<RatexOptions>(),
             display_mode: 1,
             color: &formula_color,
+            ..Default::default()
         };
         let result = unsafe { ratex_parse_and_layout(input.as_ptr(), &opts) };
         assert_eq!(result.error_code, 0);
@@ -534,6 +656,7 @@ mod tests {
             struct_size: std::mem::size_of::<RatexOptions>(),
             display_mode: 1,
             color: &invalid,
+            ..Default::default()
         };
 
         let result = unsafe { ratex_parse_and_layout(input.as_ptr(), &opts) };
@@ -553,6 +676,7 @@ mod tests {
             struct_size: std::mem::size_of::<RatexOptions>(),
             display_mode: 1,
             color: std::ptr::null(),
+            ..Default::default()
         };
 
         let result = unsafe { ratex_parse_and_layout(input.as_ptr(), &opts) };
@@ -566,5 +690,111 @@ mod tests {
         unsafe { ratex_free_display_list(result.data) };
 
         assert_default_glyph_path_color_is_black(&json);
+    }
+
+    unsafe extern "C" fn half_em_per_char(
+        ctx: *mut c_void,
+        text: *const c_char,
+        style_flags: u32,
+        out: *mut f64,
+    ) -> c_int {
+        let calls = unsafe { &mut *(ctx as *mut Vec<(String, u32)>) };
+        let text = unsafe { CStr::from_ptr(text) }
+            .to_string_lossy()
+            .into_owned();
+        let width = 0.5 * text.chars().count() as f64;
+        calls.push((text, style_flags));
+        unsafe {
+            *out = width;
+            *out.add(1) = 0.7;
+            *out.add(2) = 0.2;
+        }
+        0
+    }
+
+    fn layout_json(
+        latex: &str,
+        compat: c_int,
+        flags: u32,
+        calls: Option<&mut Vec<(String, u32)>>,
+    ) -> Value {
+        let input = CString::new(latex).unwrap();
+        let measure_ctx = calls.map_or(std::ptr::null_mut(), |c| c as *mut _ as *mut c_void);
+        let opts = RatexOptions {
+            display_mode: 0,
+            compat,
+            flags,
+            measure_text: (!measure_ctx.is_null()).then_some(
+                half_em_per_char
+                    as unsafe extern "C" fn(*mut c_void, *const c_char, u32, *mut f64) -> c_int,
+            ),
+            measure_text_ctx: measure_ctx,
+            ..Default::default()
+        };
+        let result = unsafe { ratex_parse_and_layout(input.as_ptr(), &opts) };
+        assert_eq!(result.error_code, 0, "{latex}: {:?}", unsafe {
+            CStr::from_ptr(ratex_get_last_error())
+        });
+        let json = unsafe { CStr::from_ptr(result.data) }
+            .to_string_lossy()
+            .into_owned();
+        unsafe { ratex_free_display_list(result.data) };
+        serde_json::from_str(&json).unwrap()
+    }
+
+    #[test]
+    fn host_measurer_receives_whole_text_runs() {
+        let mut calls = Vec::new();
+        let v = layout_json(r"x=\text{हिंदी में \textbf{bold}}", 1, 0, Some(&mut calls));
+        assert_eq!(
+            calls,
+            vec![("हिंदी में ".to_string(), 0), ("bold".to_string(), 1)]
+        );
+        let texts: Vec<&Value> = v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|i| i["type"] == "Text")
+            .collect();
+        assert_eq!(texts.len(), 2);
+        assert_eq!(texts[0]["text"], "हिंदी में ");
+        assert_eq!(texts[1]["bold"], true);
+        // 10 codepoints and 4 at 0.5em each
+        let w = texts[0]["width"].as_f64().unwrap() + texts[1]["width"].as_f64().unwrap();
+        assert!((w - 7.0).abs() < 1e-9, "{w}");
+    }
+
+    #[test]
+    fn without_measurer_text_stays_glyphs() {
+        let v = layout_json(r"\text{ab}", 1, 0, None);
+        assert!(v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|i| i["type"] != "Text"));
+    }
+
+    #[test]
+    fn mathjax_compat_and_color_v2_via_options() {
+        // MathJax-only syntax is rejected in KaTeX mode and accepted in MathJax mode
+        let input = CString::new(r"\int_\limits0^1 x").unwrap();
+        let katex = RatexOptions {
+            display_mode: 0,
+            ..Default::default()
+        };
+        let r = unsafe { ratex_parse_and_layout(input.as_ptr(), &katex) };
+        assert_ne!(r.error_code, 0);
+        layout_json(r"\int_\limits0^1 x", 1, 0, None);
+        // colorv2: only the argument is red
+        let v = layout_json(r"\color{red}{x}+y", 1, RATEX_FLAG_COLOR_V2, None);
+        let reds = v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|i| {
+                i["color"]["r"].as_f64() == Some(1.0) && i["color"]["g"].as_f64() == Some(0.0)
+            })
+            .count();
+        assert_eq!(reds, 1);
     }
 }

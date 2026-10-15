@@ -22,7 +22,8 @@ fn compound_domains_preserve_inherited_color_in_every_style() {
                     DisplayItem::GlyphPath { color, .. }
                     | DisplayItem::Line { color, .. }
                     | DisplayItem::Rect { color, .. }
-                    | DisplayItem::Path { color, .. } => color,
+                    | DisplayItem::Path { color, .. }
+                    | DisplayItem::Text { color, .. } => color,
                 };
                 assert_eq!(actual, color, "{formula}: {style:?}");
             }

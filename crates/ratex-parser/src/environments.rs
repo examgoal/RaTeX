@@ -255,7 +255,8 @@ pub fn parse_array(
         let next = parser.fetch()?.text.clone();
 
         if next == "&" {
-            if let Some(max) = config.max_num_cols {
+            // MathJax lets rows run past the declared columns (they reuse the last alignment)
+            if let Some(max) = config.max_num_cols.filter(|_| !parser.compat.is_mathjax()) {
                 if row.len() >= max {
                     return Err(ParseError::msg("Too many tab characters: &"));
                 }
@@ -446,6 +447,8 @@ fn register_array(map: &mut HashMap<&'static str, EnvSpec>) {
                     pregap: None,
                     postgap: None,
                 }),
+                // MathJax skips letters it does not know (`{left}` is one l column)
+                _ if ctx.parser.compat.is_mathjax() => {}
                 _ => return Err(ParseError::msg(format!("Unknown column alignment: {}", ca))),
             }
         }
@@ -1200,6 +1203,8 @@ fn register_subarray(map: &mut HashMap<&'static str, EnvSpec>) {
                     pregap: None,
                     postgap: None,
                 }),
+                // MathJax skips letters it does not know (`{left}` is one l column)
+                _ if ctx.parser.compat.is_mathjax() => {}
                 _ => return Err(ParseError::msg(format!("Unknown column alignment: {}", ca))),
             }
         }

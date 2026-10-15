@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::color::Color;
 use crate::path_command::PathCommand;
+use crate::text::TextStyle;
 
 /// The final output of the layout engine: a flat list of drawing commands
 /// with absolute coordinates, ready for platform renderers.
@@ -51,6 +52,22 @@ pub enum DisplayItem {
         y: f64,
         commands: Vec<PathCommand>,
         fill: bool,
+        color: Color,
+    },
+    /// Draw a run of text with the host's own font, baseline-left at (x, y),
+    /// at `scale` times the formula font size. Only produced when layout was
+    /// given a [`crate::TextMeasurer`], which measured this exact run;
+    /// `width`/`height`/`depth` are that measurement in display-list units.
+    Text {
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        depth: f64,
+        scale: f64,
+        text: String,
+        #[serde(flatten)]
+        style: TextStyle,
         color: Color,
     },
 }

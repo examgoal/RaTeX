@@ -220,6 +220,8 @@ fn build_content_stream(
 
     for item in items {
         match item {
+            // Text runs exist only when layout had a host TextMeasurer, which this renderer never sets
+            DisplayItem::Text { .. } => {}
             DisplayItem::GlyphPath {
                 x,
                 y,
@@ -714,7 +716,8 @@ fn collect_alpha_graphics_states(items: &[DisplayItem], alloc: &mut Ref) -> Alph
             DisplayItem::GlyphPath { color, .. }
             | DisplayItem::Line { color, .. }
             | DisplayItem::Rect { color, .. }
-            | DisplayItem::Path { color, .. } => color,
+            | DisplayItem::Path { color, .. }
+            | DisplayItem::Text { color, .. } => color,
         };
 
         if let Some(key) = alpha_key(color.a) {

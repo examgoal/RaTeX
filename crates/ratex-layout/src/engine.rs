@@ -7,6 +7,7 @@ use ratex_parser::parse_node::{
 use ratex_types::color::Color;
 use ratex_types::math_style::MathStyle;
 use ratex_types::path_command::PathCommand;
+use ratex_types::TextStyle;
 
 use crate::hbox::make_hbox;
 use crate::layout_box::{
@@ -21,6 +22,9 @@ use crate::stacked_delim::make_stacked_delim_if_needed;
 /// TeX `\nulldelimiterspace` = 1.2pt = 0.12em (at 10pt design size).
 /// KaTeX wraps every `\frac` / `\atop` in mopen+mclose nulldelimiter spans of this width.
 const NULL_DELIMITER_SPACE: f64 = 0.12;
+
+/// How far MathJax extends a fraction bar past its widest part, per side (em).
+const MATHJAX_FRACTION_BAR_OVERHANG: f64 = 0.1;
 
 fn style_str_to_math_style(style: &StyleStr) -> MathStyle {
     match style {
@@ -98,7 +102,36 @@ fn layout_expression(
         return layout_multiline(nodes, options, is_real_group);
     }
 
-    let raw_classes: Vec<Option<MathClass>> = nodes.iter().map(node_math_class).collect();
+    make_hbox(layout_spaced(nodes, options, is_real_group, |node| {
+        layout_node(node, options)
+    }))
+}
+
+/// Lay out `nodes` left to right with TeX inter-atom spacing (when
+/// `is_real_group`), using `lay_out` for each node.
+fn layout_spaced(
+    nodes: &[ParseNode],
+    options: &LayoutOptions,
+    is_real_group: bool,
+    lay_out: impl Fn(&ParseNode) -> LayoutBox,
+) -> Vec<LayoutBox> {
+    let raw_classes: Vec<Option<MathClass>> = nodes
+        .iter()
+        .map(|node| match node {
+            // MathJax spaces a bare fraction like an ordinary atom (TeX and
+            // KaTeX treat it as Inner, which adds thin spaces around it)
+            ParseNode::GenFrac { .. } if options.compat.is_mathjax() => {
+                node_math_class(node).map(|c| {
+                    if c == MathClass::Inner {
+                        MathClass::Ord
+                    } else {
+                        c
+                    }
+                })
+            }
+            _ => node_math_class(node),
+        })
+        .collect();
     let eff_classes = apply_bin_cancellation(&raw_classes);
 
     let mut children = Vec::new();
@@ -107,7 +140,7 @@ fn layout_expression(
     let mut prev_class_node_idx: Option<usize> = None;
 
     for (i, node) in nodes.iter().enumerate() {
-        let lbox = layout_node(node, options);
+        let lbox = lay_out(node);
         let cur_class = eff_classes.get(i).copied().flatten();
 
         if is_real_group {
@@ -144,7 +177,7 @@ fn layout_expression(
         children.push(lbox);
     }
 
-    make_hbox(children)
+    children
 }
 
 /// Layout an expression containing line-break nodes (\\, \newline) as a VBox.
@@ -445,6 +478,12 @@ fn layout_node(node: &ParseNode, options: &LayoutOptions) -> LayoutBox {
         ParseNode::ProofTree { tree, .. } => layout_proof_tree(tree, options),
 
         ParseNode::Sizing { size, body, .. } => layout_sizing(*size, body, options),
+
+        ParseNode::Text { body, font, .. } if options.text_measurer.is_some() => layout_host_text(
+            body,
+            host_text_style(TextStyle::default(), font.as_deref()),
+            options,
+        ),
 
         ParseNode::Text {
             body, font, mode, ..
@@ -1067,7 +1106,12 @@ fn layout_fraction(
         }
     }
 
-    let total_width = numer_width.max(denom_width);
+    let mut total_width = numer_width.max(denom_width);
+    if options.compat.is_mathjax() && bar_thickness > 0.0 {
+        // MathJax draws the bar 0.1em past the wider of numerator/denominator
+        // on each side (SVGmfrac.makeFraction); the parts stay centered.
+        total_width += 2.0 * MATHJAX_FRACTION_BAR_OVERHANG;
+    }
     let height = numer_height + num_shift;
     let depth = denom_depth + den_shift;
 
@@ -1228,8 +1272,21 @@ fn layout_supsub(
                 ..
             }) if name == "\\oiint" || name == "\\oiiint"
         );
+        // MathJax also tucks the subscript of an accented letter (`\vec{V}_1`)
+        // under the letter's italic correction, like a bare `V_1`.
+        let mathjax_accent = options.compat.is_mathjax()
+            && matches!(
+                base,
+                Some(ParseNode::Accent { base: accent_base, .. })
+                    if is_character_box(get_base_elem(accent_base))
+            );
         let base_italic = direct_italic
             .or_else(|| is_oiint.then(|| first_glyph_italic(&base_box)).flatten())
+            .or_else(|| {
+                mathjax_accent
+                    .then(|| accent_base_italic(&base_box))
+                    .flatten()
+            })
             .unwrap_or(0.0);
         -base_italic
     } else {
@@ -1348,15 +1405,24 @@ fn layout_radical(
 
     // Root index (e.g. \sqrt[3]{x}): KaTeX uses SCRIPTSCRIPT (TeX: superscript of superscript).
     const INDEX_KERN: f64 = 0.05;
-    let (index_box, index_offset, index_scale) = if let Some(index_node) = index {
+    let (index_box, index_offset, index_scale, index_x) = if let Some(index_node) = index {
         let root_style = options.style.superscript().superscript();
         let root_opts = options.with_style(root_style);
         let idx = layout_node(index_node, &root_opts);
         let index_ratio = root_style.size_multiplier() / options.style.size_multiplier();
-        let offset = idx.width * index_ratio + INDEX_KERN;
-        (Some(Box::new(idx)), offset, index_ratio)
+        let index_width = idx.width * index_ratio;
+        if options.compat.is_mathjax() {
+            // MathJax (CommonMroot.getRootDimens): the index ends 0.6 of the
+            // way into the surd and only widens the box when it is wider than that.
+            let tuck = 0.6 * advance_width;
+            let offset = index_width.max(tuck) - tuck;
+            (Some(Box::new(idx)), offset, index_ratio, tuck - index_width)
+        } else {
+            let offset = index_width + INDEX_KERN;
+            (Some(Box::new(idx)), offset, index_ratio, 5.0 / 18.0)
+        }
     } else {
-        (None, 0.0, 1.0)
+        (None, 0.0, 1.0, 0.0)
     };
 
     let width = index_offset + advance_width + body_box.width;
@@ -1370,6 +1436,7 @@ fn layout_radical(
             index: index_box,
             index_offset,
             index_scale,
+            index_x,
             rule_thickness: rule_width,
             inner_height: tex_height,
         },
@@ -1812,6 +1879,15 @@ fn first_glyph_italic(lb: &LayoutBox) -> Option<f64> {
     match &lb.content {
         BoxContent::Glyph { .. } => direct_glyph_italic(lb),
         BoxContent::HBox(children) => children.iter().find_map(first_glyph_italic),
+        _ => None,
+    }
+}
+
+/// Italic correction of the letter under an accent box (`\vec{V}` → V's).
+fn accent_base_italic(lb: &LayoutBox) -> Option<f64> {
+    match &lb.content {
+        BoxContent::Accent { base, .. } => first_glyph_italic(base),
+        BoxContent::HBox(children) if children.len() == 1 => accent_base_italic(&children[0]),
         _ => None,
     }
 }
@@ -3163,13 +3239,23 @@ fn layout_array(
         })
         .unwrap_or_default();
     let col_aligns: Vec<u8> = {
+        // Columns past the spec: centered (KaTeX) or the last alignment repeated (MathJax)
+        let overflow_align = if options.compat.is_mathjax() {
+            align_specs
+                .last()
+                .and_then(|s| s.align.as_deref())
+                .and_then(|a| a.bytes().next())
+                .unwrap_or(b'c')
+        } else {
+            b'c'
+        };
         (0..num_cols)
             .map(|c| {
                 align_specs
                     .get(c)
                     .and_then(|s| s.align.as_deref())
                     .and_then(|a| a.bytes().next())
-                    .unwrap_or(b'c')
+                    .unwrap_or(overflow_align)
             })
             .collect()
     };
@@ -3288,12 +3374,14 @@ fn layout_array(
     }
 
     // Extra x padding before col 0 and after last col (hskip_before_and_after).
-    let content_x_offset = if hskip {
+    // MathJax keeps it only on a side that has a frame rule (`{|c|}`).
+    let mathjax = options.compat.is_mathjax();
+    let content_x_offset = if hskip && (!mathjax || col_separators[0].is_some()) {
         side_gaps.first().map(|g| g.0).unwrap_or(0.0)
     } else {
         0.0
     };
-    let content_x_end_offset = if hskip {
+    let content_x_end_offset = if hskip && (!mathjax || col_separators[num_cols].is_some()) {
         side_gaps.last().map(|g| g.1).unwrap_or(0.0)
     } else {
         0.0
@@ -3707,6 +3795,78 @@ fn layout_text(body: &[ParseNode], options: &LayoutOptions) -> LayoutBox {
     make_text_runs(children, options.color, 0.0)
 }
 
+/// `style` changed by a text font command (`\textbf`, `\textup`, …).
+fn host_text_style(mut style: TextStyle, font: Option<&str>) -> TextStyle {
+    match font.map(|f| f.trim_start_matches('\\')) {
+        Some("textbf" | "bf") => style.bold = true,
+        Some("textmd") => style.bold = false,
+        Some("textit" | "emph" | "it" | "textsl") => style.italic = true,
+        Some("textup") => style.italic = false,
+        Some("texttt" | "tt") => style.monospace = true,
+        Some("textrm" | "textsf" | "rm" | "sf") => style.monospace = false,
+        Some("textnormal") => style = TextStyle::default(),
+        _ => {}
+    }
+    style
+}
+
+/// Lay out text-mode content as runs the host measures and draws with its own
+/// font (`LayoutOptions::text_measurer`). Characters and plain spaces join a
+/// run; nested font commands start a restyled run; anything else (inline math,
+/// spacing commands, accents) is laid out normally between runs.
+fn layout_host_text(body: &[ParseNode], style: TextStyle, options: &LayoutOptions) -> LayoutBox {
+    let Some(measurer) = options.text_measurer.as_ref() else {
+        return layout_text(body, options);
+    };
+    let mut children = Vec::new();
+    let mut run = String::new();
+    let flush = |run: &mut String, children: &mut Vec<LayoutBox>| {
+        if run.is_empty() {
+            return;
+        }
+        let text = std::mem::take(run);
+        let m = measurer.0.measure(&text, style);
+        children.push(LayoutBox {
+            width: m.width,
+            height: m.height,
+            depth: m.depth,
+            content: BoxContent::HostText { text, style },
+            color: options.color,
+        });
+    };
+    for node in body {
+        match node {
+            ParseNode::TextOrd { text, mode, .. } | ParseNode::MathOrd { text, mode, .. }
+                if *mode == Mode::Text =>
+            {
+                run.push(resolve_symbol_char(text, *mode));
+            }
+            ParseNode::SpacingNode { text, .. }
+                if matches!(
+                    text.as_str(),
+                    " " | "\\ " | "~" | "\\nobreakspace" | "\\space"
+                ) =>
+            {
+                run.push(' ');
+            }
+            ParseNode::Text { body, font, .. } => {
+                flush(&mut run, &mut children);
+                children.push(layout_host_text(
+                    body,
+                    host_text_style(style, font.as_deref()),
+                    options,
+                ));
+            }
+            _ => {
+                flush(&mut run, &mut children);
+                children.push(layout_node(node, options));
+            }
+        }
+    }
+    flush(&mut run, &mut children);
+    make_hbox(children)
+}
+
 /// Layout \pmb — poor man's bold via CSS-style text shadow.
 /// Renders the body twice: once normally, once offset by (0.02em, 0.01em).
 fn layout_pmb(body: &[ParseNode], options: &LayoutOptions) -> LayoutBox {
@@ -3782,10 +3942,13 @@ fn layout_enclose(
 
     // KaTeX defaults: fboxpad = 3pt, fboxrule = 0.4pt
     let metrics = options.metrics();
-    let padding = 3.0 / metrics.pt_per_em;
-    let border_thickness = 0.4 / metrics.pt_per_em;
-
     let has_border = matches!(label, "\\fbox" | "\\fcolorbox");
+    let (padding, border_thickness) = if options.compat.is_mathjax() && label == "\\fbox" {
+        // MathJax draws \fbox / \boxed as a menclose box: .2em padding, .067em rule
+        (0.2, 0.067)
+    } else {
+        (3.0 / metrics.pt_per_em, 0.4 / metrics.pt_per_em)
+    };
 
     let bg = background_color.and_then(|c| Color::from_name(c).or_else(|| Color::from_hex(c)));
     let border = border_color
@@ -4204,10 +4367,11 @@ fn layout_font(font: &str, body: &ParseNode, options: &LayoutOptions) -> LayoutB
 fn layout_with_font(node: &ParseNode, font_id: FontId, options: &LayoutOptions) -> LayoutBox {
     match node {
         ParseNode::OrdGroup { body, .. } => {
-            let children = body
-                .iter()
-                .map(|node| layout_with_font(node, font_id, options))
-                .collect();
+            // A font switch keeps atom classes: `\mathrm{a=b}` spaces the
+            // relation like `a=b` (TeX, KaTeX and MathJax all do).
+            let children = layout_spaced(body, options, true, |node| {
+                layout_with_font(node, font_id, options)
+            });
             make_text_runs(children, options.color, options.inter_glyph_kern_em)
         }
         ParseNode::SupSub { base, sup, sub, .. } => {

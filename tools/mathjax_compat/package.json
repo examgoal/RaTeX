@@ -1,0 +1,9 @@
+{
+  "name": "ratex-mathjax-compat",
+  "private": true,
+  "type": "module",
+  "description": "Diff RaTeX layout against MathJax 3 on a formula corpus",
+  "dependencies": {
+    "mathjax-full": "3.2.2"
+  }
+}

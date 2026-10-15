@@ -393,7 +393,8 @@ mod tests {
                 DisplayItem::GlyphPath { color, .. }
                 | DisplayItem::Line { color, .. }
                 | DisplayItem::Rect { color, .. }
-                | DisplayItem::Path { color, .. } => *color,
+                | DisplayItem::Path { color, .. }
+                | DisplayItem::Text { color, .. } => *color,
             })
             .collect();
 

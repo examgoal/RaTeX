@@ -13,4 +13,5 @@ mod tests;
 
 pub use error::{ParseError, ParseResult};
 pub use parse_node::{Mode, ParseNode};
-pub use parser::{parse, Parser};
+pub use parser::{parse, parse_with_options, ParseOptions, Parser};
+pub use ratex_types::Compat;

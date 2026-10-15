@@ -122,6 +122,32 @@ Enums use **serde internally-tagged** format:
 }
 ```
 
+#### Text
+
+Emitted only when layout was given a host text measurer (C ABI
+`RatexOptions.measure_text`, Android `RaTeXTextMeasurer`). Text-mode runs
+(`\text{…}`, `\textbf{…}`, …) are measured by the host and must be drawn by the
+host with the same font, so complex scripts (e.g. Devanagari) are shaped.
+
+```json
+{
+  "type": "Text",
+  "x": 0.0, "y": 0.8, "width": 2.1, "height": 0.7, "depth": 0.2,
+  "scale": 1.0,
+  "text": "हिंदी",
+  "bold": false, "italic": false, "monospace": false,
+  "color": { "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0 }
+}
+```
+
+- **x, y**: left end of the run's baseline.
+- **scale**: font size multiplier relative to the formula font size.
+- **width, height, depth**: the host's measurement, already multiplied by `scale`.
+- **bold / italic / monospace**: style the host measured with.
+
+Decoders that do not know `Text` should skip it (the run will be missing) rather
+than fail the whole formula.
+
 ### 3.3 `PathCommand`
 
 ```jsonc

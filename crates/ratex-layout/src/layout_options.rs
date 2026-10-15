@@ -1,6 +1,9 @@
 use ratex_font::{get_global_metrics, MathConstants};
 use ratex_types::color::Color;
 use ratex_types::math_style::MathStyle;
+use ratex_types::Compat;
+use ratex_types::TextMeasurer;
+use std::rc::Rc;
 
 /// Layout options passed through the layout tree.
 #[derive(Debug, Clone)]
@@ -18,6 +21,21 @@ pub struct LayoutOptions {
     /// This is layout state propagated through `\tiny` ... `\Huge`; callers
     /// should normally leave it at its default.
     pub explicit_size_multiplier: f64,
+    /// Dialect to follow where KaTeX and MathJax lay out differently.
+    pub compat: Compat,
+    /// When set, text-mode runs are measured (and later drawn) by the host
+    /// instead of being laid out glyph by glyph from the KaTeX fonts.
+    pub text_measurer: Option<HostTextMeasurer>,
+}
+
+/// Shared handle to a host [`TextMeasurer`].
+#[derive(Clone)]
+pub struct HostTextMeasurer(pub Rc<dyn TextMeasurer>);
+
+impl std::fmt::Debug for HostTextMeasurer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HostTextMeasurer")
+    }
 }
 
 impl Default for LayoutOptions {
@@ -29,6 +47,8 @@ impl Default for LayoutOptions {
             leftright_delim_height: None,
             inter_glyph_kern_em: 0.0,
             explicit_size_multiplier: 1.0,
+            compat: Compat::KaTeX,
+            text_measurer: None,
         }
     }
 }
@@ -50,6 +70,8 @@ impl LayoutOptions {
             leftright_delim_height: self.leftright_delim_height,
             inter_glyph_kern_em: self.inter_glyph_kern_em,
             explicit_size_multiplier: self.explicit_size_multiplier,
+            compat: self.compat,
+            text_measurer: self.text_measurer.clone(),
         }
     }
 
@@ -61,6 +83,22 @@ impl LayoutOptions {
             leftright_delim_height: self.leftright_delim_height,
             inter_glyph_kern_em: self.inter_glyph_kern_em,
             explicit_size_multiplier: self.explicit_size_multiplier,
+            compat: self.compat,
+            text_measurer: self.text_measurer.clone(),
+        }
+    }
+
+    pub fn with_compat(&self, compat: Compat) -> Self {
+        Self {
+            compat,
+            ..self.clone()
+        }
+    }
+
+    pub fn with_text_measurer(&self, measurer: Rc<dyn TextMeasurer>) -> Self {
+        Self {
+            text_measurer: Some(HostTextMeasurer(measurer)),
+            ..self.clone()
         }
     }
 

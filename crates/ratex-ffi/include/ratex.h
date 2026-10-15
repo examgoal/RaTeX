@@ -38,7 +38,12 @@
  *       { "type": "Rect", "x": <f64>, "y": <f64>, "width": <f64>, "height": <f64>,
  *         "color": {...} },
  *       { "type": "Path", "x": <f64>, "y": <f64>, "commands": [<PathCommand>, ...],
- *         "fill": <bool>, "color": {...} }
+ *         "fill": <bool>, "color": {...} },
+ *       { "type": "Text", "x": <f64>, "y": <f64>, "width": <f64>, "height": <f64>,
+ *         "depth": <f64>, "scale": <f64>, "text": <string>, "bold": <bool>,
+ *         "italic": <bool>, "monospace": <bool>, "color": {...} }
+ *         // only when RatexOptions.measure_text is set: draw `text` with the
+ *         // host font at scale × font size, baseline-left at (x, y)
  *     ]
  *   }
  *
@@ -82,10 +87,26 @@ typedef struct {
     float a; /* normalized 0..1 */
 } RatexColor;
 
+/**
+ * Host text measurer: measure NUL-terminated UTF-8 `text` in the host font at a
+ * 1em font size with `style_flags` (1 = bold, 2 = italic, 4 = monospace); write
+ * advance width, height above and depth below the baseline (em) to out[0..2].
+ * Return 0 on success. Called synchronously on the calling thread.
+ */
+typedef int (*RatexMeasureTextFn)(void* ctx, const char* text, unsigned int style_flags, double* out);
+
+/** RatexOptions.flags: MathJax colorv2 — \color{c}{x} colors only x. */
+#define RATEX_FLAG_COLOR_V2 1u
+
 typedef struct {
     size_t struct_size;
     int display_mode; /* 0 = inline ($...$), 1 = display block ($$...$$) */
     const RatexColor* color; /* NULL = default black */
+    /* Since the MathJax-compatibility fork; ignored when struct_size predates them. */
+    int compat;                       /* 0 = KaTeX (default), 1 = MathJax 3 */
+    unsigned int flags;               /* RATEX_FLAG_* bits */
+    RatexMeasureTextFn measure_text;  /* NULL = text drawn as KaTeX glyphs */
+    void* measure_text_ctx;           /* passed back to measure_text */
 } RatexOptions;
 
 /**

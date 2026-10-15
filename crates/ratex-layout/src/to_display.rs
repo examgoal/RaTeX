@@ -216,6 +216,20 @@ fn emit_box(
                 }
             }
 
+            BoxContent::HostText { text, style } => {
+                items.push(DisplayItem::Text {
+                    x,
+                    y,
+                    width: lbox.width * scale,
+                    height: lbox.height * scale,
+                    depth: lbox.depth * scale,
+                    scale,
+                    text: text.clone(),
+                    style: *style,
+                    color: lbox.color,
+                });
+            }
+
             BoxContent::Rule { thickness, raise } => {
                 // Baseline at `y` (downward screen coords); bottom of ink is `raise` em above baseline.
                 let cy = y - (raise + thickness / 2.0) * scale;
@@ -328,6 +342,7 @@ fn emit_box(
                 index,
                 index_offset,
                 index_scale,
+                index_x,
                 rule_thickness,
                 inner_height,
             } => {
@@ -343,16 +358,17 @@ fn emit_box(
                     // That aligns the root span with the sqrt body on the math baseline, then
                     // shifts the glyph upward by `toShift` — not pinned to the top of the surd.
                     //
-                    // Horizontal: KaTeX places the index at `\mkern 5mu` (5/18 em) from the LEFT
-                    // of the surd glyph, matching `.sqrt > .root { margin-left: 5/18em }`.
-                    // Using surd_x as the reference makes this scale correctly for all surd sizes
-                    // and for nested radicals where each level has a different index_offset.
+                    // Horizontal: `index_x` from the LEFT of the surd glyph — KaTeX's
+                    // `\mkern 5mu` (`.sqrt > .root { margin-left: 5/18em }`), or MathJax's
+                    // tuck under the surd. Using surd_x as the reference makes this scale
+                    // correctly for all surd sizes and for nested radicals where each level
+                    // has a different index_offset.
                     let to_shift = 0.6 * (lbox.height - lbox.depth);
                     let index_baseline_y = y - to_shift * scale;
                     let child_scale = scale * index_scale;
                     Some(EmitAction::Box {
                         lbox: index_box,
-                        x: surd_x + (5.0 / 18.0) * scale,
+                        x: surd_x + index_x * scale,
                         y: index_baseline_y,
                         scale: child_scale,
                     })
@@ -967,6 +983,19 @@ fn compute_visual_bounds(items: &[DisplayItem]) -> (f64, f64, f64, f64) {
                 min_y = min_y.min(*y);
                 max_y = max_y.max(y + height);
             }
+            DisplayItem::Text {
+                x,
+                y,
+                width,
+                height,
+                depth,
+                ..
+            } => {
+                min_x = min_x.min(*x);
+                max_x = max_x.max(x + width);
+                min_y = min_y.min(y - height);
+                max_y = max_y.max(y + depth);
+            }
             // Paths in document em space (delimiters, accents): include bbox so tall `tallDelim`
             // curves are not clipped at the pixmap edge. Skip astronomical KaTeX coords (e.g. \phase).
             DisplayItem::Path {
@@ -1024,6 +1053,7 @@ fn shift_item_y(item: &mut DisplayItem, dy: f64) {
         DisplayItem::Line { y, .. } => *y += dy,
         DisplayItem::Rect { y, .. } => *y += dy,
         DisplayItem::Path { y, .. } => *y += dy,
+        DisplayItem::Text { y, .. } => *y += dy,
     }
 }
 
@@ -1033,5 +1063,6 @@ fn shift_item_x(item: &mut DisplayItem, dx: f64) {
         DisplayItem::Line { x, .. } => *x += dx,
         DisplayItem::Rect { x, .. } => *x += dx,
         DisplayItem::Path { x, .. } => *x += dx,
+        DisplayItem::Text { x, .. } => *x += dx,
     }
 }

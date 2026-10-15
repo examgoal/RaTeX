@@ -74,6 +74,8 @@ pub fn render_to_cairo(
 
     for item in &display_list.items {
         match item {
+            // Text runs exist only when layout had a host TextMeasurer, which this renderer never sets
+            DisplayItem::Text { .. } => {}
             DisplayItem::GlyphPath {
                 x,
                 y,

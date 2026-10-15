@@ -1,7 +1,7 @@
 //! RaTeX WASM bindings: parse LaTeX and return DisplayList as JSON for browser rendering.
 
 use ratex_layout::{layout, to_display_list, LayoutOptions};
-use ratex_parser::parse;
+use ratex_parser::{parse_with_options, Compat, ParseOptions};
 use ratex_types::color::Color;
 use ratex_types::display_item::{DisplayItem, DisplayList};
 use ratex_types::math_style::MathStyle;
@@ -30,6 +30,10 @@ export interface RenderLatexOptions {
     displayMode?: boolean;
     /** Default formula color as a supported color string or normalized RGBA components. */
     color?: RenderColor;
+    /** TeX dialect where KaTeX and MathJax disagree: `"katex"` (default) or `"mathjax"`. */
+    compat?: "katex" | "mathjax";
+    /** MathJax colorv2: `\\color{c}{x}` colors only `x`. */
+    colorV2?: boolean;
 }
 "#;
 
@@ -72,9 +76,9 @@ pub fn render_latex_with_options(
     latex: &str,
     options: Option<JsRenderLatexOptions>,
 ) -> Result<String, JsValue> {
-    let (color, display_mode) =
-        parse_render_options(options).map_err(|error| JsValue::from_str(&error))?;
-    render_latex_impl(latex, color, display_mode).map_err(|error| JsValue::from_str(&error))
+    let parsed = parse_render_options(options).map_err(|error| JsValue::from_str(&error))?;
+    render_latex_dialect(latex, parsed.color, parsed.display_mode, parsed.parse)
+        .map_err(|error| JsValue::from_str(&error))
 }
 
 fn render_latex_impl(
@@ -82,13 +86,24 @@ fn render_latex_impl(
     color: Option<Color>,
     display_mode: Option<bool>,
 ) -> Result<String, String> {
-    let nodes = parse(latex).map_err(|e| e.to_string())?;
+    render_latex_dialect(latex, color, display_mode, ParseOptions::default())
+}
+
+fn render_latex_dialect(
+    latex: &str,
+    color: Option<Color>,
+    display_mode: Option<bool>,
+    parse_options: ParseOptions,
+) -> Result<String, String> {
+    let nodes = parse_with_options(latex, &parse_options).map_err(|e| e.to_string())?;
     let style = if display_mode.unwrap_or(true) {
         MathStyle::Display
     } else {
         MathStyle::Text
     };
-    let options = LayoutOptions::default().with_style(style);
+    let options = LayoutOptions::default()
+        .with_style(style)
+        .with_compat(parse_options.compat);
     let options = if let Some(color) = color {
         options.with_color(color)
     } else {
@@ -108,11 +123,19 @@ fn render_latex_impl(
     serde_json::to_string(&versioned).map_err(|e| e.to_string())
 }
 
-fn parse_render_options(
-    options: Option<JsRenderLatexOptions>,
-) -> Result<(Option<Color>, Option<bool>), String> {
+struct RenderOptions {
+    color: Option<Color>,
+    display_mode: Option<bool>,
+    parse: ParseOptions,
+}
+
+fn parse_render_options(options: Option<JsRenderLatexOptions>) -> Result<RenderOptions, String> {
     let Some(options) = options else {
-        return Ok((None, None));
+        return Ok(RenderOptions {
+            color: None,
+            display_mode: None,
+            parse: ParseOptions::default(),
+        });
     };
     let options: JsValue = options.into();
     if !options.is_object() {
@@ -133,7 +156,21 @@ fn parse_render_options(
         None => None,
     };
 
-    Ok((color, display_mode))
+    let compat = match optional_property(&options, "compat")?.and_then(|v| v.as_string()) {
+        Some(name) if name.eq_ignore_ascii_case("mathjax") => Compat::MathJax,
+        Some(name) if name.eq_ignore_ascii_case("katex") => Compat::KaTeX,
+        Some(name) => return Err(format!("invalid options.compat: {name:?}")),
+        None => Compat::KaTeX,
+    };
+    let color_v2 = optional_property(&options, "colorV2")?
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    Ok(RenderOptions {
+        color,
+        display_mode,
+        parse: ParseOptions { compat, color_v2 },
+    })
 }
 
 fn optional_property(target: &JsValue, name: &str) -> Result<Option<JsValue>, String> {
@@ -234,6 +271,19 @@ fn sanitize_item(item: &mut DisplayItem) {
             sanitize_f64(y);
             for cmd in commands {
                 sanitize_path_command(cmd);
+            }
+        }
+        DisplayItem::Text {
+            x,
+            y,
+            width,
+            height,
+            depth,
+            scale,
+            ..
+        } => {
+            for v in [x, y, width, height, depth, scale] {
+                sanitize_f64(v);
             }
         }
     }

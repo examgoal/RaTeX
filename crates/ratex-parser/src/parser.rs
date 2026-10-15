@@ -1,6 +1,8 @@
 use ratex_lexer::token::{SourceLocation, Token};
 use unicode_normalization::UnicodeNormalization;
 
+use ratex_types::Compat;
+
 use crate::error::{ParseError, ParseResult};
 use crate::functions::{self, ArgType, FunctionContext, FUNCTIONS};
 use crate::macro_expander::{MacroExpander, IMPLICIT_COMMANDS};
@@ -30,18 +32,41 @@ pub struct Parser<'a> {
     depth_budget: DepthBudget,
     next_token: Option<Token>,
     pub equation_counter: usize,
+    pub compat: Compat,
+}
+
+/// Parser settings; the default is plain KaTeX behavior.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ParseOptions {
+    /// Dialect to follow where KaTeX and MathJax disagree.
+    pub compat: Compat,
+    /// MathJax `colorv2`: `\color{c}{x}` colors only its argument (like
+    /// `\textcolor`) instead of switching the color for the rest of the group.
+    pub color_v2: bool,
 }
 
 impl<'a> Parser<'a> {
     pub fn new(input: &'a str) -> Self {
+        Self::with_options(input, &ParseOptions::default())
+    }
+
+    pub fn with_options(input: &'a str, options: &ParseOptions) -> Self {
         let depth_budget = DepthBudget::new(MAX_INPUT_DEPTH);
+        let mut gullet = MacroExpander::new_with_budget(input, Mode::Math, depth_budget.clone());
+        if options.compat.is_mathjax() {
+            gullet.load_mathjax_macros();
+        }
+        if options.color_v2 {
+            gullet.set_text_macro("\\color", "\\textcolor");
+        }
         Self {
             mode: Mode::Math,
-            gullet: MacroExpander::new_with_budget(input, Mode::Math, depth_budget.clone()),
+            gullet,
             leftright_depth: 0,
             depth_budget,
             next_token: None,
             equation_counter: 0,
+            compat: options.compat,
         }
     }
 
@@ -327,33 +352,41 @@ impl<'a> Parser<'a> {
         let mut superscript: Option<ParseNode> = None;
         let mut subscript: Option<ParseNode> = None;
 
+        let mut limits_peeked = false;
         loop {
             self.consume_spaces()?;
             let lex = self.fetch()?;
+
+            if self.compat.is_mathjax() && !limits_peeked && (lex.text == "^" || lex.text == "_") {
+                // MathJax applies a \limits written right after the script
+                // marker to the base: `\int_\limits0^1` is `\int\limits_0^1`.
+                self.consume();
+                self.consume_spaces()?;
+                loop {
+                    let next = self.fetch()?;
+                    if next.text != "\\limits" && next.text != "\\nolimits" {
+                        break;
+                    }
+                    self.consume();
+                    if let Some(base_node) = base.as_mut() {
+                        Self::set_limits(base_node, next.text == "\\limits");
+                    }
+                    self.consume_spaces()?;
+                }
+                // put the script marker back as the lookahead
+                self.gullet
+                    .push_token(self.next_token.take().expect("fetched token"));
+                self.next_token = Some(lex);
+                limits_peeked = true;
+                continue;
+            }
+            limits_peeked = false;
 
             if lex.text == "\\limits" || lex.text == "\\nolimits" {
                 let is_limits = lex.text == "\\limits";
                 self.consume();
                 if let Some(base_node) = base.as_mut() {
-                    match base_node {
-                        ParseNode::Op {
-                            limits,
-                            always_handle_sup_sub,
-                            ..
-                        } => {
-                            *limits = is_limits;
-                            *always_handle_sup_sub = Some(is_limits);
-                        }
-                        ParseNode::OperatorName {
-                            limits,
-                            always_handle_sup_sub,
-                            ..
-                        } => {
-                            *limits = is_limits;
-                            *always_handle_sup_sub = is_limits;
-                        }
-                        _ => {}
-                    }
+                    Self::set_limits(base_node, is_limits);
                 }
             } else if lex.text == "^" {
                 if superscript.is_some() {
@@ -450,6 +483,29 @@ impl<'a> Parser<'a> {
     }
 
     /// Handle a subscript or superscript.
+    /// Apply `\limits` / `\nolimits` to an operator base (no-op for other nodes).
+    fn set_limits(base: &mut ParseNode, is_limits: bool) {
+        match base {
+            ParseNode::Op {
+                limits,
+                always_handle_sup_sub,
+                ..
+            } => {
+                *limits = is_limits;
+                *always_handle_sup_sub = Some(is_limits);
+            }
+            ParseNode::OperatorName {
+                limits,
+                always_handle_sup_sub,
+                ..
+            } => {
+                *limits = is_limits;
+                *always_handle_sup_sub = is_limits;
+            }
+            _ => {}
+        }
+    }
+
     fn handle_sup_subscript(&mut self, name: &str) -> ParseResult<ParseNode> {
         let symbol_token = self.fetch()?;
         self.consume();
@@ -1369,6 +1425,11 @@ fn strip_outer_math_delimiters(input: &str) -> &str {
 /// Convenience function: parse a LaTeX string and return the AST.
 pub fn parse(input: &str) -> ParseResult<Vec<ParseNode>> {
     Parser::new(strip_outer_math_delimiters(input)).parse()
+}
+
+/// [`parse`] with explicit [`ParseOptions`] (e.g. MathJax compatibility).
+pub fn parse_with_options(input: &str, options: &ParseOptions) -> ParseResult<Vec<ParseNode>> {
+    Parser::with_options(strip_outer_math_delimiters(input), options).parse()
 }
 
 #[cfg(test)]
