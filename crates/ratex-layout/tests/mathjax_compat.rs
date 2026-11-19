@@ -44,6 +44,8 @@ fn mathjax_only_syntax_parses() {
         r"\int_\limits0^a x",
         r"\int_\limits\limits0^a x",
         r"\buildrel {top} \over \longrightarrow",
+        r"\root 8 \of 5",
+        r"{\left( {\sqrt 3 + \root 8 \of 5 } \right)^{256}}",
         r"\matrix{1 & 2 \cr 3 & 4}",
         r"\pmatrix{1 & 2 \cr 3 & 4}",
         r"\eqalign{a &= b \cr c &= d}",
@@ -61,6 +63,22 @@ fn mathjax_only_syntax_parses() {
     // KaTeX mode keeps rejecting them
     let (katex, _) = options(Compat::KaTeX);
     assert!(parse_with_options(r"\int_\limits0^a x", &katex).is_err());
+    assert!(parse_with_options(r"\root 8 \of 5", &katex).is_err());
+}
+
+#[test]
+fn plain_tex_root_is_an_indexed_square_root() {
+    for (root, sqrt) in [
+        (r"\root 8 \of 5", r"\sqrt[8]{5}"),
+        (r"\root n \of {x+1}", r"\sqrt[n]{x+1}"),
+        (r"\root{3}\of x", r"\sqrt[3]{x}"),
+        (r"\root 3 \of {729 + qx} - 9", r"\sqrt[3]{729 + qx} - 9"),
+        (r"\root 7 \of {\root 3 \of x}", r"\sqrt[7]{\sqrt[3]{x}}"),
+    ] {
+        assert_close(mj(root), mj(sqrt), root);
+    }
+    // a `]` in the index stays in the index
+    assert!(mj(r"\root [a] \of x") > mj(r"\root a \of x"));
 }
 
 #[test]

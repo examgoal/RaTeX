@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 /// RaTeX follows KaTeX by default. [`Compat::MathJax`] switches the parser and
 /// layout to MathJax 3 behavior for content authored against MathJax:
 ///
-/// - parser: plain-TeX `\matrix`, `\pmatrix`, `\eqalign`, `\buildrel … \over …`;
+/// - parser: plain-TeX `\matrix`, `\pmatrix`, `\eqalign`, `\buildrel … \over …`,
+///   `\root … \of …`;
 ///   `\limits` written after the script marker (`\int_\limits0^1`); unknown
 ///   `array` column letters ignored; `\require`, `\class`, `\style`, `\cssId`
 ///   accepted (their decoration is dropped);
