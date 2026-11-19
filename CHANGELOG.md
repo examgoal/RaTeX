@@ -13,6 +13,8 @@ section.
 
 ### Added
 
+- **MathJax compatibility**: plain TeX's `\root <index> \of <radicand>`, which
+  MathType writes, as `\sqrt[<index>]{<radicand>}`.
 - Universal Mac Catalyst support in the Apple XCFramework and Swift package,
   with a cloud UIKit/Swift/C ABI rendering smoke and release slice verification.
 

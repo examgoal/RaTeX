@@ -655,6 +655,23 @@ impl<'a> MacroExpander<'a> {
                 Ok(out)
             }),
         );
+
+        // \root #1\of #2 — plain TeX's n-th root, which MathType writes: \sqrt[#1]{#2}. The index
+        // goes in braces so a `]` inside it can't end \sqrt's optional argument.
+        self.macros.set(
+            "\\root".to_string(),
+            MacroDefinition::Function(|me: &mut MacroExpander| -> ParseResult<Vec<Token>> {
+                let index = me.consume_arg(Some(&["\\of"]))?.tokens;
+                let radicand = me.consume_arg(None)?.tokens;
+                let mut out = lex_all("\\sqrt[{");
+                out.extend(index.into_iter().rev());
+                out.extend(lex_all("}]{"));
+                out.extend(radicand.into_iter().rev());
+                out.extend(lex_all("}"));
+                out.reverse();
+                Ok(out)
+            }),
+        );
     }
 
     fn load_function_macros(&mut self) {
