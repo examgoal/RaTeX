@@ -1,0 +1,137 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "com.examgoal",
+    "module": "ratex-android",
+    "version": "0.1.14-eg.4",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "8.5"
+    }
+  },
+  "variants": [
+    {
+      "name": "releaseVariantReleaseApiPublication",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.libraryelements": "aar",
+        "org.gradle.usage": "java-api"
+      },
+      "dependencies": [
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "1.9.24"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "ratex-android-0.1.14-eg.4.aar",
+          "url": "ratex-android-0.1.14-eg.4.aar",
+          "size": 5471822,
+          "sha512": "758303e5de9fae6ccd7de95d85a9cdcb2f7f8aea009c80ab79de6968c929a6c3f06c0afed0dda4631972dc7284c34475bf8463379f2f4452269439b22be48276",
+          "sha256": "2225c533dc88d0c9d3e61fe82b84e1abc3584b01d325c1a281abc45a84e5702c",
+          "sha1": "993901587bdc8ac9952b97ede0ad4bd5d4b6d32b",
+          "md5": "e2179229d251dcceabdbb05e0f9813b6"
+        }
+      ]
+    },
+    {
+      "name": "releaseVariantReleaseRuntimePublication",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.libraryelements": "aar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "dependencies": [
+        {
+          "group": "androidx.annotation",
+          "module": "annotation",
+          "version": {
+            "requires": "1.7.1"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlinx",
+          "module": "kotlinx-serialization-json",
+          "version": {
+            "requires": "1.6.3"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlinx",
+          "module": "kotlinx-coroutines-android",
+          "version": {
+            "requires": "1.7.3"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "1.9.24"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "ratex-android-0.1.14-eg.4.aar",
+          "url": "ratex-android-0.1.14-eg.4.aar",
+          "size": 5471822,
+          "sha512": "758303e5de9fae6ccd7de95d85a9cdcb2f7f8aea009c80ab79de6968c929a6c3f06c0afed0dda4631972dc7284c34475bf8463379f2f4452269439b22be48276",
+          "sha256": "2225c533dc88d0c9d3e61fe82b84e1abc3584b01d325c1a281abc45a84e5702c",
+          "sha1": "993901587bdc8ac9952b97ede0ad4bd5d4b6d32b",
+          "md5": "e2179229d251dcceabdbb05e0f9813b6"
+        }
+      ]
+    },
+    {
+      "name": "releaseVariantReleaseSourcePublication",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "ratex-android-0.1.14-eg.4-sources.jar",
+          "url": "ratex-android-0.1.14-eg.4-sources.jar",
+          "size": 13162,
+          "sha512": "f320133bb474b3dedc64670694a3d25ed27f8afd1e0ff35bc0d2c46f0cfa9a8f9c53615978292aeb928a731bfca75cb339745ffabc6b11bcd33341b19df6f0a5",
+          "sha256": "a76b0ef68a7b20cd461f58978f127fa502801dd7c4c44650280d1868cde1f3d6",
+          "sha1": "d2aa2e56a2017947ed8e7802d0810ad46d6b7e3a",
+          "md5": "7893529878dadf97f5975a13a80da4e6"
+        }
+      ]
+    },
+    {
+      "name": "releaseVariantReleaseJavaDocPublication",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "javadoc",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "ratex-android-0.1.14-eg.4-javadoc.jar",
+          "url": "ratex-android-0.1.14-eg.4-javadoc.jar",
+          "size": 410898,
+          "sha512": "d265f0bd112e567703b4cfee734fdb204c4d81eed8a59e03f4aa5295f562fb9c2b3a6bee5a2d1c6484413f46574c081effa4162e93be655fd175cbb1835258a2",
+          "sha256": "8262f68e0602ba050881c47eb3158518a0230ce93ee9e2b7f6a262e527f97c73",
+          "sha1": "649d6721a154167fd57923e31b62b062f25ef283",
+          "md5": "daaa6202453e30b65c4536929f5ce58b"
+        }
+      ]
+    }
+  ]
+}
